@@ -3730,8 +3730,14 @@ static int do_fork(CPUState *env, unsigned int flags, abi_ulong newsp,
             ts->child_tidptr = child_tidptr;
         }
 
-        if (nptl_flags & CLONE_SETTLS)
+        if (nptl_flags & CLONE_SETTLS) {
+#if defined(TARGET_I386) && defined(TARGET_ABI32)
+            do_set_thread_area(new_env, newtls);
+            cpu_x86_load_seg(new_env, R_GS, new_env->segs[R_GS].selector);
+#else
             cpu_set_tls (new_env, newtls);
+#endif
+        }
 
         /* Grab a mutex so that thread setup appears atomic.  */
         pthread_mutex_lock(&clone_lock);
@@ -3804,8 +3810,14 @@ static int do_fork(CPUState *env, unsigned int flags, abi_ulong newsp,
             if (flags & CLONE_PARENT_SETTID)
                 put_user_u32(gettid(), parent_tidptr);
             ts = (TaskState *)env->opaque;
-            if (flags & CLONE_SETTLS)
+            if (flags & CLONE_SETTLS) {
+#if defined(TARGET_I386) && defined(TARGET_ABI32)
+                do_set_thread_area(env, newtls);
+                cpu_x86_load_seg(env, R_GS, env->segs[R_GS].selector);
+#else
                 cpu_set_tls (env, newtls);
+#endif
+            }
             if (flags & CLONE_CHILD_CLEARTID)
                 ts->child_tidptr = child_tidptr;
 #endif
