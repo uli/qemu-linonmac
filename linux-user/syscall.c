@@ -6829,11 +6829,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         break;
 #endif
 #if TARGET_ABI_BITS == 32
-#ifdef F_GETLK64
     case TARGET_NR_fcntl64:
     {
 	int cmd;
+#ifdef __APPLE__
+        struct flock fl;
+#else
 	struct flock64 fl;
+#endif
 	struct target_flock64 *target_fl;
 #ifdef TARGET_ARM
 	struct target_eabi_flock64 *target_efl;
@@ -6926,7 +6929,6 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
 	break;
     }
-#endif /* F_GETLK64 */
 #endif
 #ifdef TARGET_NR_cacheflush
     case TARGET_NR_cacheflush:
