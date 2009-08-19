@@ -2118,6 +2118,18 @@ struct target_mq_attr {
     abi_long mq_curmsgs;
 };
 
+#define TARGET_NEW_UTS_LEN 64
+struct target_new_utsname {
+    char sysname[65];
+    char nodename[65];
+    char release[65];
+    char version[65];
+    char machine[65];
+    char domainname[65];
+};
+
+#define TARGET_PF_NETLINK 16
+
 #include "socket.h"
 
 #include "errno_defs.h"

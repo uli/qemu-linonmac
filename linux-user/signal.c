@@ -77,15 +77,19 @@ static uint8_t host_to_target_signal_table[65] = {
     [SIGPROF] = TARGET_SIGPROF,
     [SIGWINCH] = TARGET_SIGWINCH,
     [SIGIO] = TARGET_SIGIO,
+#ifdef SIGPWR
     [SIGPWR] = TARGET_SIGPWR,
+#endif
     [SIGSYS] = TARGET_SIGSYS,
     /* next signals stay the same */
     /* Nasty hack: Reverse SIGRTMIN and SIGRTMAX to avoid overlap with
        host libpthread signals.  This assumes noone actually uses SIGRTMAX :-/
        To fix this properly we need to do manual signal delivery multiplexed
        over a single host signal.  */
+#ifdef __SIGRTMAX
     [__SIGRTMIN] = __SIGRTMAX,
     [__SIGRTMAX] = __SIGRTMIN,
+#endif
 };
 static uint8_t target_to_host_signal_table[65];
 
@@ -214,7 +218,9 @@ static inline void host_to_target_siginfo_noswap(target_siginfo_t *tinfo,
            the target is irrelevant */
         tinfo->_sifields._sigfault._addr = 0;
     } else if (sig == SIGIO) {
+#ifndef __APPLE__
 	tinfo->_sifields._sigpoll._fd = info->si_fd;
+#endif
     } else if (sig >= TARGET_SIGRTMIN) {
         tinfo->_sifields._rt._pid = info->si_pid;
         tinfo->_sifields._rt._uid = info->si_uid;

@@ -82,17 +82,27 @@ if( cmd == val ) { \
     output_cmd( IPC_RMID );
     output_cmd( IPC_SET );
     output_cmd( IPC_STAT );
+#ifdef IPC_INFO
     output_cmd( IPC_INFO );
+#endif
     /* msgctl() commands */
     #ifdef __USER_MISC
     output_cmd( MSG_STAT );
     output_cmd( MSG_INFO );
     #endif
     /* shmctl() commands */
+#ifdef SHM_LOCK
     output_cmd( SHM_LOCK );
+#endif
+#ifdef SHM_UNLOCK
     output_cmd( SHM_UNLOCK );
+#endif
+#ifdef SHM_STAT
     output_cmd( SHM_STAT );
+#endif
+#ifdef SHM_INFO
     output_cmd( SHM_INFO );
+#endif
     /* semctl() commands */
     output_cmd( GETPID );
     output_cmd( GETVAL );
@@ -101,8 +111,12 @@ if( cmd == val ) { \
     output_cmd( GETZCNT );
     output_cmd( SETVAL );
     output_cmd( SETALL );
+#ifdef SEM_STAT
     output_cmd( SEM_STAT );
+#endif
+#ifdef SEM_INFO
     output_cmd( SEM_INFO );
+#endif
     output_cmd( IPC_RMID );
     output_cmd( IPC_RMID );
     output_cmd( IPC_RMID );
@@ -349,21 +363,39 @@ UNUSED static struct flags mount_flags[] = {
 #ifdef MS_DIRSYNC
     FLAG_GENERIC(MS_DIRSYNC),
 #endif
+#ifdef MS_MANDLOCK
     FLAG_GENERIC(MS_MANDLOCK),
+#endif
 #ifdef MS_MOVE
     FLAG_GENERIC(MS_MOVE),
 #endif
+#ifdef MS_NOATIME
     FLAG_GENERIC(MS_NOATIME),
+#endif
+#ifdef MS_NODEV
     FLAG_GENERIC(MS_NODEV),
+#endif
+#ifdef MS_NODIRATIME
     FLAG_GENERIC(MS_NODIRATIME),
+#endif
+#ifdef MS_NOEXEC
     FLAG_GENERIC(MS_NOEXEC),
+#endif
+#ifdef MS_NOSUID
     FLAG_GENERIC(MS_NOSUID),
+#endif
+#ifdef MS_RDONLY
     FLAG_GENERIC(MS_RDONLY),
+#endif
 #ifdef MS_RELATIME
     FLAG_GENERIC(MS_RELATIME),
 #endif
+#ifdef MS_REMOUNT
     FLAG_GENERIC(MS_REMOUNT),
+#endif
+#ifdef MS_SYNCHRONOUS
     FLAG_GENERIC(MS_SYNCHRONOUS),
+#endif
     FLAG_END,
 };
 

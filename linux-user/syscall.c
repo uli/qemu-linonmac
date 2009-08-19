@@ -22,13 +22,21 @@
 #include <stdarg.h>
 #include <string.h>
 #include <elf.h>
+#ifdef __APPLE__
+
+#else
 #include <endian.h>
+#include <mqueue.h>
+#include <sys/prctl.h>
+#include <sys/swap.h>
+#include <sys/statfs.h>
+#include <sys/sysinfo.h>
+#endif
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <time.h>
 #include <limits.h>
-#include <mqueue.h>
 #include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
@@ -36,10 +44,8 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/mount.h>
-#include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/mman.h>
-#include <sys/swap.h>
 #include <signal.h>
 #include <sched.h>
 #include <sys/socket.h>
@@ -49,9 +55,7 @@
 #include <sys/times.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
-#include <sys/statfs.h>
 #include <utime.h>
-#include <sys/sysinfo.h>
 #include <sys/utsname.h>
 //#include <sys/user.h>
 #include <netinet/ip.h>
@@ -68,6 +72,7 @@
 #define tchars host_tchars /* same as target */
 #define ltchars host_ltchars /* same as target */
 
+#ifdef __linux__
 #include <linux/termios.h>
 #include <linux/unistd.h>
 #include <linux/utsname.h>
@@ -78,6 +83,31 @@
 #include <linux/mtio.h>
 #include <linux/fs.h>
 #include "linux_loop.h"
+#endif
+#ifdef __APPLE__
+#include <sys/ttycom.h>
+#include <sys/termios.h>
+#define TCGETS TIOCGETA
+#define TCSETS TIOCSETA
+#define TCSETSF TIOCSETAF
+#define TCSETSW TIOCSETAW
+#define TCSBRK TIOCSBRK
+#include <sys/filio.h>
+#include <sys/sockio.h>
+#ifndef SIOCADDRT
+#define        SIOCADDRT        _IOW('r', 10, struct ortentry) /* add route */
+#endif
+#ifndef SIOCDELRT
+#define        SIOCDELRT        _IOW('r', 11, struct ortentry) /* delete route */
+#endif
+#include <net/if.h>
+#include <net/route.h>
+#include <sys/mtio.h>
+#include <sys/ioctl.h>
+#define CLONE_VFORK 0x4000
+#define CLONE_VM 0x100
+#define CSIGNAL 0xff
+#endif
 
 #include "qemu.h"
 #include "qemu-common.h"
@@ -194,12 +224,15 @@ static int gettid(void) {
     return -ENOSYS;
 }
 #endif
+#ifdef __linux__
 #if TARGET_ABI_BITS == 32
 _syscall3(int, sys_getdents, uint, fd, struct linux_dirent *, dirp, uint, count);
 #endif
+#endif /* __linux__ */
 #if defined(TARGET_NR_getdents64) && defined(__NR_getdents64)
 _syscall3(int, sys_getdents64, uint, fd, struct linux_dirent64 *, dirp, uint, count);
 #endif
+#ifdef __linux__
 _syscall2(int, sys_getpriority, int, which, int, who);
 #if defined(TARGET_NR__llseek) && !defined (__x86_64__)
 _syscall5(int, _llseek,  uint,  fd, ulong, hi, ulong, lo,
@@ -225,6 +258,7 @@ _syscall6(int,sys_futex,int *,uaddr,int,op,int,val,
           const struct timespec *,timeout,int *,uaddr2,int,val3)
 #endif
 #endif
+#endif /* __linux__ */
 
 static bitmask_transtbl fcntl_flags_tbl[] = {
   { TARGET_O_ACCMODE,   TARGET_O_WRONLY,    O_ACCMODE,   O_WRONLY,    },
@@ -248,12 +282,12 @@ static bitmask_transtbl fcntl_flags_tbl[] = {
 
 #define COPY_UTSNAME_FIELD(dest, src) \
   do { \
-      /* __NEW_UTS_LEN doesn't include terminating null */ \
-      (void) strncpy((dest), (src), __NEW_UTS_LEN); \
-      (dest)[__NEW_UTS_LEN] = '\0'; \
+      /* TARGET_NEW_UTS_LEN doesn't include terminating null */ \
+      (void) strncpy((dest), (src), TARGET_NEW_UTS_LEN); \
+      (dest)[TARGET_NEW_UTS_LEN] = '\0'; \
   } while (0)
 
-static int sys_uname(struct new_utsname *buf)
+static int sys_uname(struct target_new_utsname *buf)
 {
   struct utsname uts_buf;
 
@@ -262,7 +296,7 @@ static int sys_uname(struct new_utsname *buf)
 
   /*
    * Just in case these have some differences, we
-   * translate utsname to new_utsname (which is the
+   * translate utsname to target_new_utsname (which is the
    * struct linux kernel uses).
    */
 
@@ -512,10 +546,14 @@ static int sys_inotify_rm_watch(int fd, int32_t wd)
 
 
 extern int personality(int);
+#ifndef __APPLE__
 extern int flock(int, int);
+#endif
 extern int setfsuid(int);
 extern int setfsgid(int);
+#ifndef __APPLE__
 extern int setgroups(int, gid_t *);
+#endif
 
 #define ERRNO_TABLE_SIZE 1200
 
@@ -530,53 +568,22 @@ static uint16_t target_to_host_errno_table[ERRNO_TABLE_SIZE] = {
  */
 static uint16_t host_to_target_errno_table[ERRNO_TABLE_SIZE] = {
     [EIDRM]		= TARGET_EIDRM,
-    [ECHRNG]		= TARGET_ECHRNG,
-    [EL2NSYNC]		= TARGET_EL2NSYNC,
-    [EL3HLT]		= TARGET_EL3HLT,
-    [EL3RST]		= TARGET_EL3RST,
-    [ELNRNG]		= TARGET_ELNRNG,
-    [EUNATCH]		= TARGET_EUNATCH,
-    [ENOCSI]		= TARGET_ENOCSI,
-    [EL2HLT]		= TARGET_EL2HLT,
     [EDEADLK]		= TARGET_EDEADLK,
     [ENOLCK]		= TARGET_ENOLCK,
-    [EBADE]		= TARGET_EBADE,
-    [EBADR]		= TARGET_EBADR,
-    [EXFULL]		= TARGET_EXFULL,
-    [ENOANO]		= TARGET_ENOANO,
-    [EBADRQC]		= TARGET_EBADRQC,
-    [EBADSLT]		= TARGET_EBADSLT,
-    [EBFONT]		= TARGET_EBFONT,
     [ENOSTR]		= TARGET_ENOSTR,
     [ENODATA]		= TARGET_ENODATA,
     [ETIME]		= TARGET_ETIME,
     [ENOSR]		= TARGET_ENOSR,
-    [ENONET]		= TARGET_ENONET,
-    [ENOPKG]		= TARGET_ENOPKG,
     [EREMOTE]		= TARGET_EREMOTE,
     [ENOLINK]		= TARGET_ENOLINK,
-    [EADV]		= TARGET_EADV,
-    [ESRMNT]		= TARGET_ESRMNT,
-    [ECOMM]		= TARGET_ECOMM,
     [EPROTO]		= TARGET_EPROTO,
-    [EDOTDOT]		= TARGET_EDOTDOT,
     [EMULTIHOP]		= TARGET_EMULTIHOP,
     [EBADMSG]		= TARGET_EBADMSG,
     [ENAMETOOLONG]	= TARGET_ENAMETOOLONG,
     [EOVERFLOW]		= TARGET_EOVERFLOW,
-    [ENOTUNIQ]		= TARGET_ENOTUNIQ,
-    [EBADFD]		= TARGET_EBADFD,
-    [EREMCHG]		= TARGET_EREMCHG,
-    [ELIBACC]		= TARGET_ELIBACC,
-    [ELIBBAD]		= TARGET_ELIBBAD,
-    [ELIBSCN]		= TARGET_ELIBSCN,
-    [ELIBMAX]		= TARGET_ELIBMAX,
-    [ELIBEXEC]		= TARGET_ELIBEXEC,
     [EILSEQ]		= TARGET_EILSEQ,
     [ENOSYS]		= TARGET_ENOSYS,
     [ELOOP]		= TARGET_ELOOP,
-    [ERESTART]		= TARGET_ERESTART,
-    [ESTRPIPE]		= TARGET_ESTRPIPE,
     [ENOTEMPTY]		= TARGET_ENOTEMPTY,
     [EUSERS]		= TARGET_EUSERS,
     [ENOTSOCK]		= TARGET_ENOTSOCK,
@@ -599,11 +606,6 @@ static uint16_t host_to_target_errno_table[ERRNO_TABLE_SIZE] = {
     [ENOBUFS]		= TARGET_ENOBUFS,
     [EISCONN]		= TARGET_EISCONN,
     [ENOTCONN]		= TARGET_ENOTCONN,
-    [EUCLEAN]		= TARGET_EUCLEAN,
-    [ENOTNAM]		= TARGET_ENOTNAM,
-    [ENAVAIL]		= TARGET_ENAVAIL,
-    [EISNAM]		= TARGET_EISNAM,
-    [EREMOTEIO]		= TARGET_EREMOTEIO,
     [ESHUTDOWN]		= TARGET_ESHUTDOWN,
     [ETOOMANYREFS]	= TARGET_ETOOMANYREFS,
     [ETIMEDOUT]		= TARGET_ETIMEDOUT,
@@ -615,7 +617,45 @@ static uint16_t host_to_target_errno_table[ERRNO_TABLE_SIZE] = {
     [ESTALE]		= TARGET_ESTALE,
     [ECANCELED]		= TARGET_ECANCELED,
     [ENOMEDIUM]		= TARGET_ENOMEDIUM,
+#ifdef __linux__
+    [ECHRNG]		= TARGET_ECHRNG,
+    [EL2NSYNC]		= TARGET_EL2NSYNC,
+    [EL3HLT]		= TARGET_EL3HLT,
+    [EL3RST]		= TARGET_EL3RST,
+    [ELNRNG]		= TARGET_ELNRNG,
+    [EUNATCH]		= TARGET_EUNATCH,
+    [ENOCSI]		= TARGET_ENOCSI,
+    [EL2HLT]		= TARGET_EL2HLT,
+    [EBADE]		= TARGET_EBADE,
+    [EBADR]		= TARGET_EBADR,
+    [EXFULL]		= TARGET_EXFULL,
+    [ENOANO]		= TARGET_ENOANO,
+    [EBADRQC]		= TARGET_EBADRQC,
+    [EBADSLT]		= TARGET_EBADSLT,
+    [EBFONT]		= TARGET_EBFONT,
+    [ENONET]		= TARGET_ENONET,
+    [ENOPKG]		= TARGET_ENOPKG,
+    [EADV]		= TARGET_EADV,
+    [ESRMNT]		= TARGET_ESRMNT,
+    [ECOMM]		= TARGET_ECOMM,
+    [EDOTDOT]		= TARGET_EDOTDOT,
+    [ENOTUNIQ]		= TARGET_ENOTUNIQ,
+    [EBADFD]		= TARGET_EBADFD,
+    [EREMCHG]		= TARGET_EREMCHG,
+    [ELIBACC]		= TARGET_ELIBACC,
+    [ELIBBAD]		= TARGET_ELIBBAD,
+    [ELIBSCN]		= TARGET_ELIBSCN,
+    [ELIBMAX]		= TARGET_ELIBMAX,
+    [ELIBEXEC]		= TARGET_ELIBEXEC,
+    [ERESTART]		= TARGET_ERESTART,
+    [ESTRPIPE]		= TARGET_ESTRPIPE,
+    [EUCLEAN]		= TARGET_EUCLEAN,
+    [ENOTNAM]		= TARGET_ENOTNAM,
+    [ENAVAIL]		= TARGET_ENAVAIL,
+    [EISNAM]		= TARGET_EISNAM,
+    [EREMOTEIO]		= TARGET_EREMOTEIO,
     [EMEDIUMTYPE]	= TARGET_EMEDIUMTYPE,
+#endif
 #ifdef ENOKEY
     [ENOKEY]		= TARGET_ENOKEY,
 #endif
@@ -847,6 +887,7 @@ static inline abi_long copy_to_user_timeval(abi_ulong target_tv_addr,
     return 0;
 }
 
+#ifdef __linux__
 static inline abi_long copy_from_user_mq_attr(struct mq_attr *attr,
                                               abi_ulong target_mq_attr_addr)
 {
@@ -884,6 +925,7 @@ static inline abi_long copy_to_user_mq_attr(abi_ulong target_mq_attr_addr,
 
     return 0;
 }
+#endif
 
 /* do_select() must return target values and target errnos. */
 static abi_long do_select(int n,
@@ -973,6 +1015,7 @@ static abi_long do_pipe(void *cpu_env, abi_ulong pipedes, int flags)
     return get_errno(ret);
 }
 
+#ifdef __linux__
 static inline abi_long target_to_host_ip_mreq(struct ip_mreqn *mreqn,
                                               abi_ulong target_addr,
                                               socklen_t len)
@@ -990,6 +1033,7 @@ static inline abi_long target_to_host_ip_mreq(struct ip_mreqn *mreqn,
 
     return 0;
 }
+#endif
 
 static inline abi_long target_to_host_sockaddr(struct sockaddr *addr,
                                                abi_ulong target_addr,
@@ -1126,7 +1170,11 @@ static inline abi_long host_to_target_cmsg(struct target_msghdr *target_msgh,
         void *data = CMSG_DATA(cmsg);
         void *target_data = TARGET_CMSG_DATA(target_cmsg);
 
-        int len = cmsg->cmsg_len - CMSG_ALIGN(sizeof (struct cmsghdr));
+        int len = cmsg->cmsg_len
+#ifndef __APPLE__
+                                 - CMSG_ALIGN(sizeof (struct cmsghdr))
+#endif
+                                                                      ;
 
         space += TARGET_CMSG_SPACE(len);
         if (space > msg_controllen) {
@@ -1170,7 +1218,7 @@ static abi_long do_setsockopt(int sockfd, int level, int optname,
     struct ip_mreq_source *ip_mreq_source;
 
     switch(level) {
-    case SOL_TCP:
+    case TARGET_SOL_TCP:
         /* TCP options all take an 'int' value.  */
         if (optlen < sizeof(uint32_t))
             return -TARGET_EINVAL;
@@ -1179,18 +1227,28 @@ static abi_long do_setsockopt(int sockfd, int level, int optname,
             return -TARGET_EFAULT;
         ret = get_errno(setsockopt(sockfd, level, optname, &val, sizeof(val)));
         break;
-    case SOL_IP:
+    case TARGET_SOL_IP:
         switch(optname) {
         case IP_TOS:
         case IP_TTL:
         case IP_HDRINCL:
+#ifdef IP_ROUTER_ALERT
         case IP_ROUTER_ALERT:
+#endif
         case IP_RECVOPTS:
         case IP_RETOPTS:
+#ifdef IP_PKTINFO
         case IP_PKTINFO:
+#endif
+#ifdef IP_MTU_DISCOVER
         case IP_MTU_DISCOVER:
+#endif
+#ifdef IP_RECVERR
         case IP_RECVERR:
+#endif
+#ifdef IP_RECVTOS
         case IP_RECVTOS:
+#endif
 #ifdef IP_FREEBIND
         case IP_FREEBIND:
 #endif
@@ -1206,6 +1264,7 @@ static abi_long do_setsockopt(int sockfd, int level, int optname,
             }
             ret = get_errno(setsockopt(sockfd, level, optname, &val, sizeof(val)));
             break;
+#ifdef __linux__
         case IP_ADD_MEMBERSHIP:
         case IP_DROP_MEMBERSHIP:
             if (optlen < sizeof (struct target_ip_mreq) ||
@@ -1216,11 +1275,20 @@ static abi_long do_setsockopt(int sockfd, int level, int optname,
             target_to_host_ip_mreq(ip_mreq, optval_addr, optlen);
             ret = get_errno(setsockopt(sockfd, level, optname, ip_mreq, optlen));
             break;
+#endif
 
+#ifdef IP_BLOCK_SOURCE
         case IP_BLOCK_SOURCE:
+#endif
+#ifdef IP_UNBLOCK_SOURCE
         case IP_UNBLOCK_SOURCE:
+#endif
+#ifdef IP_ADD_SOURCE_MEMBERSHIP
         case IP_ADD_SOURCE_MEMBERSHIP:
+#endif
+#ifdef IP_DROP_SOURCE_MEMBERSHIP
         case IP_DROP_SOURCE_MEMBERSHIP:
+#endif
             if (optlen != sizeof (struct target_ip_mreq_source))
                 return -TARGET_EINVAL;
 
@@ -1266,20 +1334,26 @@ static abi_long do_setsockopt(int sockfd, int level, int optname,
         case TARGET_SO_OOBINLINE:
 		optname = SO_OOBINLINE;
 		break;
+#ifdef SO_NO_CHECK
         case TARGET_SO_NO_CHECK:
 		optname = SO_NO_CHECK;
 		break;
+#endif
+#ifdef SO_PRIORITY
         case TARGET_SO_PRIORITY:
 		optname = SO_PRIORITY;
 		break;
+#endif
 #ifdef SO_BSDCOMPAT
         case TARGET_SO_BSDCOMPAT:
 		optname = SO_BSDCOMPAT;
 		break;
 #endif
+#ifdef SO_PASSCRED
         case TARGET_SO_PASSCRED:
 		optname = SO_PASSCRED;
 		break;
+#endif
         case TARGET_SO_TIMESTAMP:
 		optname = SO_TIMESTAMP;
 		break;
@@ -1334,7 +1408,7 @@ static abi_long do_getsockopt(int sockfd, int level, int optname,
             goto int_case;
         }
         break;
-    case SOL_TCP:
+    case TARGET_SOL_TCP:
         /* TCP options all take an 'int' value.  */
     int_case:
         if (get_user_u32(len, optlen))
@@ -1357,18 +1431,28 @@ static abi_long do_getsockopt(int sockfd, int level, int optname,
         if (put_user_u32(len, optlen))
             return -TARGET_EFAULT;
         break;
-    case SOL_IP:
+    case TARGET_SOL_IP:
         switch(optname) {
         case IP_TOS:
         case IP_TTL:
         case IP_HDRINCL:
+#ifdef IP_ROUTER_ALERT
         case IP_ROUTER_ALERT:
+#endif
         case IP_RECVOPTS:
         case IP_RETOPTS:
+#ifdef IP_PKTINFO
         case IP_PKTINFO:
+#endif
+#ifdef IP_MTU_DISCOVER
         case IP_MTU_DISCOVER:
+#endif
+#ifdef IP_RECVERR
         case IP_RECVERR:
+#endif
+#ifdef IP_REVCTOS
         case IP_RECVTOS:
+#endif
 #ifdef IP_FREEBIND
         case IP_FREEBIND:
 #endif
@@ -1486,7 +1570,7 @@ static abi_long do_socket(int domain, int type, int protocol)
         break;
     }
 #endif
-    if (domain == PF_NETLINK)
+    if (domain == TARGET_PF_NETLINK)
         return -EAFNOSUPPORT; /* do not NETLINK socket connections possible */
     return get_errno(socket(domain, type, protocol));
 }
@@ -2064,7 +2148,11 @@ static inline abi_long target_to_host_ipc_perm(struct ipc_perm *host_ip,
     if (!lock_user_struct(VERIFY_READ, target_sd, target_addr, 1))
         return -TARGET_EFAULT;
     target_ip=&(target_sd->sem_perm);
+#ifdef __APPLE__
+    host_ip->_key = tswapl(target_ip->__key);
+#else
     host_ip->__key = tswapl(target_ip->__key);
+#endif
     host_ip->uid = tswapl(target_ip->uid);
     host_ip->gid = tswapl(target_ip->gid);
     host_ip->cuid = tswapl(target_ip->cuid);
@@ -2083,7 +2171,11 @@ static inline abi_long host_to_target_ipc_perm(abi_ulong target_addr,
     if (!lock_user_struct(VERIFY_WRITE, target_sd, target_addr, 0))
         return -TARGET_EFAULT;
     target_ip = &(target_sd->sem_perm);
+#ifdef __APPLE__
+    target_ip->__key = tswapl(host_ip->_key);
+#else
     target_ip->__key = tswapl(host_ip->__key);
+#endif
     target_ip->uid = tswapl(host_ip->uid);
     target_ip->gid = tswapl(host_ip->gid);
     target_ip->cuid = tswapl(host_ip->cuid);
@@ -2138,6 +2230,7 @@ struct target_seminfo {
     int semaem;
 };
 
+#ifdef __linux__
 static inline abi_long host_to_target_seminfo(abi_ulong target_addr,
                                               struct seminfo *host_seminfo)
 {
@@ -2164,6 +2257,7 @@ union semun {
 	unsigned short *array;
 	struct seminfo *__buf;
 };
+#endif
 
 union target_semun {
 	int val;
@@ -2234,6 +2328,7 @@ static inline abi_long host_to_target_semarray(int semid, abi_ulong target_addr,
     return 0;
 }
 
+#ifdef __linux__
 static inline abi_long do_semctl(int semid, int semnum, int cmd,
                                  union target_semun target_su)
 {
@@ -2293,6 +2388,7 @@ static inline abi_long do_semctl(int semid, int semnum, int cmd,
 
     return ret;
 }
+#endif
 
 struct target_sembuf {
     unsigned short sem_num;
@@ -2369,7 +2465,11 @@ static inline abi_long target_to_host_msqid_ds(struct msqid_ds *host_md,
     host_md->msg_stime = tswapl(target_md->msg_stime);
     host_md->msg_rtime = tswapl(target_md->msg_rtime);
     host_md->msg_ctime = tswapl(target_md->msg_ctime);
+#ifdef __APPLE__
+    host_md->msg_cbytes = tswapl(target_md->__msg_cbytes);
+#else
     host_md->__msg_cbytes = tswapl(target_md->__msg_cbytes);
+#endif
     host_md->msg_qnum = tswapl(target_md->msg_qnum);
     host_md->msg_qbytes = tswapl(target_md->msg_qbytes);
     host_md->msg_lspid = tswapl(target_md->msg_lspid);
@@ -2390,7 +2490,11 @@ static inline abi_long host_to_target_msqid_ds(abi_ulong target_addr,
     target_md->msg_stime = tswapl(host_md->msg_stime);
     target_md->msg_rtime = tswapl(host_md->msg_rtime);
     target_md->msg_ctime = tswapl(host_md->msg_ctime);
+#ifdef __APPLE__
+    target_md->__msg_cbytes = tswapl(host_md->msg_cbytes);
+#else
     target_md->__msg_cbytes = tswapl(host_md->__msg_cbytes);
+#endif
     target_md->msg_qnum = tswapl(host_md->msg_qnum);
     target_md->msg_qbytes = tswapl(host_md->msg_qbytes);
     target_md->msg_lspid = tswapl(host_md->msg_lspid);
@@ -2416,8 +2520,10 @@ static inline abi_long host_to_target_msginfo(abi_ulong target_addr,
     struct target_msginfo *target_msginfo;
     if (!lock_user_struct(VERIFY_WRITE, target_msginfo, target_addr, 0))
         return -TARGET_EFAULT;
+#ifdef __linux__
     __put_user(host_msginfo->msgpool, &target_msginfo->msgpool);
     __put_user(host_msginfo->msgmap, &target_msginfo->msgmap);
+#endif
     __put_user(host_msginfo->msgmax, &target_msginfo->msgmax);
     __put_user(host_msginfo->msgmnb, &target_msginfo->msgmnb);
     __put_user(host_msginfo->msgmni, &target_msginfo->msgmni);
@@ -2439,7 +2545,9 @@ static inline abi_long do_msgctl(int msgid, int cmd, abi_long ptr)
     switch (cmd) {
     case IPC_STAT:
     case IPC_SET:
+#ifdef MSG_STAT
     case MSG_STAT:
+#endif
         if (target_to_host_msqid_ds(&dsarg,ptr))
             return -TARGET_EFAULT;
         ret = get_errno(msgctl(msgid, cmd, &dsarg));
@@ -2449,12 +2557,14 @@ static inline abi_long do_msgctl(int msgid, int cmd, abi_long ptr)
     case IPC_RMID:
         ret = get_errno(msgctl(msgid, cmd, NULL));
         break;
+#ifdef IPC_INFO
     case IPC_INFO:
     case MSG_INFO:
         ret = get_errno(msgctl(msgid, cmd, (struct msqid_ds *)&msginfo));
         if (host_to_target_msginfo(ptr, &msginfo))
             return -TARGET_EFAULT;
         break;
+#endif
     }
 
     return ret;
@@ -2469,7 +2579,11 @@ static inline abi_long do_msgsnd(int msqid, abi_long msgp,
                                  unsigned int msgsz, int msgflg)
 {
     struct target_msgbuf *target_mb;
+#ifdef __APPLE__
+    struct mymsg *host_mb;
+#else
     struct msgbuf *host_mb;
+#endif
     abi_long ret = 0;
 
     if (!lock_user_struct(VERIFY_READ, target_mb, msgp, 0))
@@ -2490,7 +2604,11 @@ static inline abi_long do_msgrcv(int msqid, abi_long msgp,
 {
     struct target_msgbuf *target_mb;
     char *target_mtext;
+#ifdef __APPLE__
+    struct mymsg *host_mb;
+#else
     struct msgbuf *host_mb;
+#endif
     abi_long ret = 0;
 
     if (!lock_user_struct(VERIFY_WRITE, target_mb, msgp, 0))
@@ -2590,6 +2708,7 @@ struct  target_shminfo {
     abi_ulong shmall;
 };
 
+#ifdef __linux__
 static inline abi_long host_to_target_shminfo(abi_ulong target_addr,
                                               struct shminfo *host_shminfo)
 {
@@ -2604,6 +2723,7 @@ static inline abi_long host_to_target_shminfo(abi_ulong target_addr,
     unlock_user_struct(target_shminfo, target_addr, 1);
     return 0;
 }
+#endif
 
 struct target_shm_info {
     int used_ids;
@@ -2614,6 +2734,7 @@ struct target_shm_info {
     abi_ulong swap_successes;
 };
 
+#ifdef __linux__
 static inline abi_long host_to_target_shm_info(abi_ulong target_addr,
                                                struct shm_info *host_shm_info)
 {
@@ -2629,7 +2750,9 @@ static inline abi_long host_to_target_shm_info(abi_ulong target_addr,
     unlock_user_struct(target_shm_info, target_addr, 1);
     return 0;
 }
+#endif
 
+#ifdef __linux__
 static inline abi_long do_shmctl(int shmid, int cmd, abi_long buf)
 {
     struct shmid_ds dsarg;
@@ -2668,7 +2791,9 @@ static inline abi_long do_shmctl(int shmid, int cmd, abi_long buf)
 
     return ret;
 }
+#endif
 
+#ifdef __linux__
 static inline abi_ulong do_shmat(int shmid, abi_ulong shmaddr, int shmflg)
 {
     abi_long raddr;
@@ -2721,6 +2846,7 @@ static inline abi_ulong do_shmat(int shmid, abi_ulong shmaddr, int shmflg)
     return raddr;
 
 }
+#endif
 
 static inline abi_long do_shmdt(abi_ulong shmaddr)
 {
@@ -2759,9 +2885,11 @@ static abi_long do_ipc(unsigned int call, int first,
         ret = get_errno(semget(first, second, third));
         break;
 
+#ifdef __linux__
     case IPCOP_semctl:
         ret = do_semctl(first, second, third, (union target_semun)(abi_ulong) ptr);
         break;
+#endif
 
     case IPCOP_msgget:
         ret = get_errno(msgget(first, second));
@@ -2799,6 +2927,7 @@ static abi_long do_ipc(unsigned int call, int first,
         }
         break;
 
+#ifdef __linux__
     case IPCOP_shmat:
         switch (version) {
         default:
@@ -2816,6 +2945,8 @@ static abi_long do_ipc(unsigned int call, int first,
             break;
         }
 	break;
+#endif
+
     case IPCOP_shmdt:
         ret = do_shmdt(ptr);
 	break;
@@ -2826,9 +2957,11 @@ static abi_long do_ipc(unsigned int call, int first,
 	break;
 
 	/* IPC_* and SHM_* command values are the same on all linux platforms */
+#ifdef __linux__
     case IPCOP_shmctl:
         ret = do_shmctl(first, second, third);
         break;
+#endif
     default:
 	gemu_log("Unsupported ipc call: %d (version %d)\n", call, version);
 	ret = -TARGET_ENOSYS;
@@ -2970,7 +3103,9 @@ static const bitmask_transtbl iflag_tbl[] = {
         { TARGET_INLCR, TARGET_INLCR, INLCR, INLCR },
         { TARGET_IGNCR, TARGET_IGNCR, IGNCR, IGNCR },
         { TARGET_ICRNL, TARGET_ICRNL, ICRNL, ICRNL },
+#ifdef IUCLC
         { TARGET_IUCLC, TARGET_IUCLC, IUCLC, IUCLC },
+#endif
         { TARGET_IXON, TARGET_IXON, IXON, IXON },
         { TARGET_IXANY, TARGET_IXANY, IXANY, IXANY },
         { TARGET_IXOFF, TARGET_IXOFF, IXOFF, IXOFF },
@@ -2980,7 +3115,9 @@ static const bitmask_transtbl iflag_tbl[] = {
 
 static const bitmask_transtbl oflag_tbl[] = {
 	{ TARGET_OPOST, TARGET_OPOST, OPOST, OPOST },
+#ifdef OLCUC
 	{ TARGET_OLCUC, TARGET_OLCUC, OLCUC, OLCUC },
+#endif
 	{ TARGET_ONLCR, TARGET_ONLCR, ONLCR, ONLCR },
 	{ TARGET_OCRNL, TARGET_OCRNL, OCRNL, OCRNL },
 	{ TARGET_ONOCR, TARGET_ONOCR, ONOCR, ONOCR },
@@ -3006,6 +3143,7 @@ static const bitmask_transtbl oflag_tbl[] = {
 	{ 0, 0, 0, 0 }
 };
 
+#ifdef __linux__
 static const bitmask_transtbl cflag_tbl[] = {
 	{ TARGET_CBAUD, TARGET_B0, CBAUD, B0 },
 	{ TARGET_CBAUD, TARGET_B50, CBAUD, B50 },
@@ -3040,11 +3178,14 @@ static const bitmask_transtbl cflag_tbl[] = {
 	{ TARGET_CRTSCTS, TARGET_CRTSCTS, CRTSCTS, CRTSCTS },
 	{ 0, 0, 0, 0 }
 };
+#endif
 
 static const bitmask_transtbl lflag_tbl[] = {
 	{ TARGET_ISIG, TARGET_ISIG, ISIG, ISIG },
 	{ TARGET_ICANON, TARGET_ICANON, ICANON, ICANON },
+#ifdef XCASE
 	{ TARGET_XCASE, TARGET_XCASE, XCASE, XCASE },
+#endif
 	{ TARGET_ECHO, TARGET_ECHO, ECHO, ECHO },
 	{ TARGET_ECHOE, TARGET_ECHOE, ECHOE, ECHOE },
 	{ TARGET_ECHOK, TARGET_ECHOK, ECHOK, ECHOK },
@@ -3070,10 +3211,16 @@ static void target_to_host_termios (void *dst, const void *src)
     host->c_oflag =
         target_to_host_bitmask(tswap32(target->c_oflag), oflag_tbl);
     host->c_cflag =
+#ifdef __APPLE__
+        tswap32(target->c_cflag);
+#else
         target_to_host_bitmask(tswap32(target->c_cflag), cflag_tbl);
+#endif
     host->c_lflag =
         target_to_host_bitmask(tswap32(target->c_lflag), lflag_tbl);
+#ifdef __linux__
     host->c_line = target->c_line;
+#endif
 
     memset(host->c_cc, 0, sizeof(host->c_cc));
     host->c_cc[VINTR] = target->c_cc[TARGET_VINTR];
@@ -3083,7 +3230,9 @@ static void target_to_host_termios (void *dst, const void *src)
     host->c_cc[VEOF] = target->c_cc[TARGET_VEOF];
     host->c_cc[VTIME] = target->c_cc[TARGET_VTIME];
     host->c_cc[VMIN] = target->c_cc[TARGET_VMIN];
+#ifdef VSWTC
     host->c_cc[VSWTC] = target->c_cc[TARGET_VSWTC];
+#endif
     host->c_cc[VSTART] = target->c_cc[TARGET_VSTART];
     host->c_cc[VSTOP] = target->c_cc[TARGET_VSTOP];
     host->c_cc[VSUSP] = target->c_cc[TARGET_VSUSP];
@@ -3105,10 +3254,16 @@ static void host_to_target_termios (void *dst, const void *src)
     target->c_oflag =
         tswap32(host_to_target_bitmask(host->c_oflag, oflag_tbl));
     target->c_cflag =
+#ifdef __APPLE__
+        tswap32(host->c_cflag);
+#else
         tswap32(host_to_target_bitmask(host->c_cflag, cflag_tbl));
+#endif
     target->c_lflag =
         tswap32(host_to_target_bitmask(host->c_lflag, lflag_tbl));
+#ifdef __linux__
     target->c_line = host->c_line;
+#endif
 
     memset(target->c_cc, 0, sizeof(target->c_cc));
     target->c_cc[TARGET_VINTR] = host->c_cc[VINTR];
@@ -3118,7 +3273,9 @@ static void host_to_target_termios (void *dst, const void *src)
     target->c_cc[TARGET_VEOF] = host->c_cc[VEOF];
     target->c_cc[TARGET_VTIME] = host->c_cc[VTIME];
     target->c_cc[TARGET_VMIN] = host->c_cc[VMIN];
+#ifdef VSWTC
     target->c_cc[TARGET_VSWTC] = host->c_cc[VSWTC];
+#endif
     target->c_cc[TARGET_VSTART] = host->c_cc[VSTART];
     target->c_cc[TARGET_VSTOP] = host->c_cc[VSTOP];
     target->c_cc[TARGET_VSUSP] = host->c_cc[VSUSP];
@@ -3141,10 +3298,18 @@ static bitmask_transtbl mmap_flags_tbl[] = {
 	{ TARGET_MAP_PRIVATE, TARGET_MAP_PRIVATE, MAP_PRIVATE, MAP_PRIVATE },
 	{ TARGET_MAP_FIXED, TARGET_MAP_FIXED, MAP_FIXED, MAP_FIXED },
 	{ TARGET_MAP_ANONYMOUS, TARGET_MAP_ANONYMOUS, MAP_ANONYMOUS, MAP_ANONYMOUS },
+#ifdef MAP_GROWSDOWN
 	{ TARGET_MAP_GROWSDOWN, TARGET_MAP_GROWSDOWN, MAP_GROWSDOWN, MAP_GROWSDOWN },
+#endif
+#ifdef MAP_DENYWRITE
 	{ TARGET_MAP_DENYWRITE, TARGET_MAP_DENYWRITE, MAP_DENYWRITE, MAP_DENYWRITE },
+#endif
+#ifdef MAP_EXECUTABLE
 	{ TARGET_MAP_EXECUTABLE, TARGET_MAP_EXECUTABLE, MAP_EXECUTABLE, MAP_EXECUTABLE },
+#endif
+#ifdef MAP_LOCKED
 	{ TARGET_MAP_LOCKED, TARGET_MAP_LOCKED, MAP_LOCKED, MAP_LOCKED },
+#endif
 	{ 0, 0, 0, 0 }
 };
 
@@ -3537,6 +3702,9 @@ static int do_fork(CPUState *env, unsigned int flags, abi_ulong newsp,
         flags &= ~(CLONE_VFORK | CLONE_VM);
 
     if (flags & CLONE_VM) {
+#ifdef __APPLE__
+        return -EINVAL;
+#else /* __APPLE__ */
         TaskState *parent_ts = (TaskState *)env->opaque;
 #if defined(CONFIG_USE_NPTL)
         new_thread_info info;
@@ -3611,6 +3779,7 @@ static int do_fork(CPUState *env, unsigned int flags, abi_ulong newsp,
 	ret = clone(clone_func, new_stack + NEW_STACK_SIZE, flags, new_env);
 #endif
 #endif
+#endif /* __APPLE__ */
     } else {
         /* if no CLONE_VM, we consider it is a fork */
         if ((flags & ~(CSIGNAL | CLONE_NPTL_FLAGS2)) != 0)
@@ -3665,17 +3834,27 @@ static int target_to_host_fcntl_cmd(int cmd)
 	    return F_GETOWN;
 	case TARGET_F_SETOWN:
 	    return F_SETOWN;
+#ifdef F_GETSIG
 	case TARGET_F_GETSIG:
 	    return F_GETSIG;
+#endif
+#ifdef F_SETSIG
 	case TARGET_F_SETSIG:
 	    return F_SETSIG;
+#endif
 #if TARGET_ABI_BITS == 32
+#ifdef F_GETLK64
         case TARGET_F_GETLK64:
 	    return F_GETLK64;
+#endif
+#ifdef F_SETLK64
 	case TARGET_F_SETLK64:
 	    return F_SETLK64;
+#endif
+#ifdef F_SETLKW64
 	case TARGET_F_SETLKW64:
 	    return F_SETLKW64;
+#endif
 #endif
 	default:
             return -TARGET_EINVAL;
@@ -3687,8 +3866,10 @@ static abi_long do_fcntl(int fd, int cmd, abi_ulong arg)
 {
     struct flock fl;
     struct target_flock *target_fl;
+#ifdef F_GETLK64
     struct flock64 fl64;
     struct target_flock64 *target_fl64;
+#endif
     abi_long ret;
     int host_cmd = target_to_host_fcntl_cmd(cmd);
 
@@ -3731,6 +3912,7 @@ static abi_long do_fcntl(int fd, int cmd, abi_ulong arg)
         ret = get_errno(fcntl(fd, host_cmd, &fl));
         break;
 
+#ifdef F_GETLK64
     case TARGET_F_GETLK64:
         if (!lock_user_struct(VERIFY_READ, target_fl64, arg, 1))
             return -TARGET_EFAULT;
@@ -3764,6 +3946,7 @@ static abi_long do_fcntl(int fd, int cmd, abi_ulong arg)
         unlock_user_struct(target_fl64, arg, 0);
         ret = get_errno(fcntl(fd, host_cmd, &fl64));
         break;
+#endif /* F_GETLK64 */
 
     case TARGET_F_GETFL:
         ret = get_errno(fcntl(fd, host_cmd, arg));
@@ -3904,7 +4087,11 @@ static inline abi_long target_truncate64(void *cpu_env, const char *arg1,
         arg3 = arg4;
       }
 #endif
+#ifdef __APPLE__
+    return get_errno(truncate(arg1, target_offset64(arg2, arg3)));
+#else
     return get_errno(truncate64(arg1, target_offset64(arg2, arg3)));
+#endif
 }
 #endif
 
@@ -3921,7 +4108,11 @@ static inline abi_long target_ftruncate64(void *cpu_env, abi_long arg1,
         arg3 = arg4;
       }
 #endif
+#ifdef __APPLE__
+    return get_errno(ftruncate(arg1, target_offset64(arg2, arg3)));
+#else
     return get_errno(ftruncate64(arg1, target_offset64(arg2, arg3)));
+#endif
 }
 #endif
 
@@ -4086,7 +4277,7 @@ static int host_to_target_waitstatus(int status)
 int get_osversion(void)
 {
     static int osversion;
-    struct new_utsname buf;
+    struct target_new_utsname buf;
     const char *s;
     int i, n, tmp;
     if (osversion)
@@ -4450,7 +4641,11 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                              * do that since it's not guaranteed to be a NULL-terminated
                              * string.
                              */
+#ifdef __APPLE__
+                            ret = get_errno(mount(p3, p2, (unsigned long)arg4, g2h(arg5)));
+#else
                             ret = get_errno(mount(p, p2, p3, (unsigned long)arg4, g2h(arg5)));
+#endif
                         unlock_user(p, arg1, 0);
                         unlock_user(p2, arg2, 0);
                         unlock_user(p3, arg3, 0);
@@ -4460,10 +4655,15 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_umount:
         if (!(p = lock_user_string(arg1)))
             goto efault;
+#ifdef __APPLE__
+        ret = get_errno(unmount(p, 0));
+#else
         ret = get_errno(umount(p));
+#endif
         unlock_user(p, arg1, 0);
         break;
 #endif
+#ifndef __APPLE__
 #ifdef TARGET_NR_stime /* not on alpha */
     case TARGET_NR_stime:
         {
@@ -4474,6 +4674,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#endif /* __APPLE__ */
     case TARGET_NR_ptrace:
         goto unimplemented;
 #ifdef TARGET_NR_alarm /* not on alpha */
@@ -4687,7 +4888,13 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_umount2:
         if (!(p = lock_user_string(arg1)))
             goto efault;
+#ifdef __APPLE__
+        if (arg2 == 1 /* FIXME: TARGET_MNT_FORCE */) ret = get_errno(unmount(p, MNT_FORCE));
+        else if (arg2 == 0) ret = get_errno(unmount(p, 0));
+        else goto unimplemented;
+#else
         ret = get_errno(umount2(p, arg2));
+#endif
         unlock_user(p, arg1, 0);
         break;
 #endif
@@ -4837,6 +5044,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifndef __APPLE__
 #ifdef TARGET_NR_ssetmask /* not on alpha */
     case TARGET_NR_ssetmask:
         {
@@ -4850,6 +5058,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             ret = target_set;
         }
         break;
+#endif
 #endif
 #ifdef TARGET_NR_sigprocmask
     case TARGET_NR_sigprocmask:
@@ -4977,6 +5186,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             ret = get_errno(sigsuspend(&set));
         }
         break;
+#ifndef __APPLE__
     case TARGET_NR_rt_sigtimedwait:
         {
             sigset_t set;
@@ -5012,6 +5222,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             ret = get_errno(sys_rt_sigqueueinfo(arg1, arg2, &uinfo));
         }
         break;
+#endif
 #ifdef TARGET_NR_sigreturn
     case TARGET_NR_sigreturn:
         /* NOTE: ret is eax, so not transcoding must be done */
@@ -5181,7 +5392,11 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_swapon:
         if (!(p = lock_user_string(arg1)))
             goto efault;
+#ifdef __APPLE__
+        ret = get_errno(swapon(p));
+#else
         ret = get_errno(swapon(p, arg2));
+#endif
         unlock_user(p, arg1, 0);
         break;
 #endif
@@ -5286,12 +5501,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         unlock_user(p, arg2, 0);
         break;
 #endif
+#ifndef __APPLE__
     case TARGET_NR_getpriority:
         /* libc does special remapping of the return value of
          * sys_getpriority() so it's just easiest to call
          * sys_getpriority() directly rather than through libc. */
         ret = sys_getpriority(arg1, arg2);
         break;
+#endif
     case TARGET_NR_setpriority:
         ret = get_errno(setpriority(arg1, arg2, arg3));
         break;
@@ -5317,9 +5534,15 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             __put_user(stfs.f_bavail, &target_stfs->f_bavail);
             __put_user(stfs.f_files, &target_stfs->f_files);
             __put_user(stfs.f_ffree, &target_stfs->f_ffree);
+#ifdef __APPLE__
+            __put_user(stfs.f_fsid.val[0], &target_stfs->f_fsid.val[0]);
+            __put_user(stfs.f_fsid.val[1], &target_stfs->f_fsid.val[1]);
+            __put_user(MAXPATHLEN, &target_stfs->f_namelen);
+#else
             __put_user(stfs.f_fsid.__val[0], &target_stfs->f_fsid.val[0]);
             __put_user(stfs.f_fsid.__val[1], &target_stfs->f_fsid.val[1]);
             __put_user(stfs.f_namelen, &target_stfs->f_namelen);
+#endif
             unlock_user_struct(target_stfs, arg2, 1);
         }
         break;
@@ -5345,9 +5568,15 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             __put_user(stfs.f_bavail, &target_stfs->f_bavail);
             __put_user(stfs.f_files, &target_stfs->f_files);
             __put_user(stfs.f_ffree, &target_stfs->f_ffree);
+#ifdef __APPLE__
+            __put_user(stfs.f_fsid.val[0], &target_stfs->f_fsid.val[0]);
+            __put_user(stfs.f_fsid.val[1], &target_stfs->f_fsid.val[1]);
+            __put_user(MAXPATHLEN, &target_stfs->f_namelen);
+#else
             __put_user(stfs.f_fsid.__val[0], &target_stfs->f_fsid.val[0]);
             __put_user(stfs.f_fsid.__val[1], &target_stfs->f_fsid.val[1]);
             __put_user(stfs.f_namelen, &target_stfs->f_namelen);
+#endif
             unlock_user_struct(target_stfs, arg3, 1);
         }
         break;
@@ -5450,12 +5679,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         break;
 #endif
 
+#ifndef __APPLE__
     case TARGET_NR_syslog:
         if (!(p = lock_user_string(arg2)))
             goto efault;
         ret = get_errno(sys_syslog((int)arg1, p, (int)arg3));
         unlock_user(p, arg2, 0);
         break;
+#endif
 
     case TARGET_NR_setitimer:
         {
@@ -5540,9 +5771,11 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_iopl:
         goto unimplemented;
 #endif
+#ifdef __linux__
     case TARGET_NR_vhangup:
         ret = get_errno(vhangup());
         break;
+#endif
 #ifdef TARGET_NR_idle
     case TARGET_NR_idle:
         goto unimplemented;
@@ -5574,6 +5807,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
         }
         break;
+#ifdef __linux__
 #ifdef TARGET_NR_swapoff
     case TARGET_NR_swapoff:
         if (!(p = lock_user_string(arg1)))
@@ -5582,6 +5816,8 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         unlock_user(p, arg1, 0);
         break;
 #endif
+#endif
+#ifdef __linux__
     case TARGET_NR_sysinfo:
         {
             struct target_sysinfo *target_value;
@@ -5609,6 +5845,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
         }
         break;
+#endif
 #ifdef TARGET_NR_ipc
     case TARGET_NR_ipc:
 	ret = do_ipc(arg1, arg2, arg3, arg4, arg5, arg6);
@@ -5700,7 +5937,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_uname:
         /* no need to transcode because we use the linux syscall */
         {
-            struct new_utsname * buf;
+            struct target_new_utsname * buf;
 
             if (!lock_user_struct(VERIFY_WRITE, buf, arg1, 0))
                 goto efault;
@@ -5755,9 +5992,11 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_sysfs:
         goto unimplemented;
 #endif
+#ifdef __linux__
     case TARGET_NR_personality:
         ret = get_errno(personality(arg1));
         break;
+#endif
 #ifdef TARGET_NR_afs_syscall
     case TARGET_NR_afs_syscall:
         goto unimplemented;
@@ -5765,7 +6004,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #ifdef TARGET_NR__llseek /* Not on alpha */
     case TARGET_NR__llseek:
         {
-#if defined (__x86_64__)
+#if defined (__x86_64__) || defined(__APPLE__)
             ret = get_errno(lseek(arg1, ((uint64_t )arg2 << 32) | arg3, arg5));
             if (put_user_s64(ret, arg4))
                 goto efault;
@@ -5778,6 +6017,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifdef __linux__
     case TARGET_NR_getdents:
 #if TARGET_ABI_BITS != 32
         goto unimplemented;
@@ -5883,6 +6123,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif /* TARGET_NR_getdents64 */
+#endif /* __linux__ */
 #ifdef TARGET_NR__newselect
     case TARGET_NR__newselect:
         ret = do_select(arg1, arg2, arg3, arg4, arg5);
@@ -5949,16 +6190,19 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_getsid:
         ret = get_errno(getsid(arg1));
         break;
+#ifndef __APPLE__
 #if defined(TARGET_NR_fdatasync) /* Not on alpha (osf_datasync ?) */
     case TARGET_NR_fdatasync:
         ret = get_errno(fdatasync(arg1));
         break;
+#endif
 #endif
     case TARGET_NR__sysctl:
         /* We don't implement this, but ENOTDIR is always a safe
            return value. */
         ret = -TARGET_ENOTDIR;
         break;
+#ifndef __APPLE__
     case TARGET_NR_sched_setparam:
         {
             struct sched_param *target_schp;
@@ -5998,6 +6242,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_sched_getscheduler:
         ret = get_errno(sched_getscheduler(arg1));
         break;
+#endif /* __APPLE__ */
     case TARGET_NR_sched_yield:
         ret = get_errno(sched_yield());
         break;
@@ -6007,6 +6252,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_sched_get_priority_min:
         ret = get_errno(sched_get_priority_min(arg1));
         break;
+#ifndef __APPLE__
     case TARGET_NR_sched_rr_get_interval:
         {
             struct timespec ts;
@@ -6016,6 +6262,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
         }
         break;
+#endif
     case TARGET_NR_nanosleep:
         {
             struct timespec req, rem;
@@ -6034,6 +6281,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_nfsservctl:
         goto unimplemented;
 #endif
+#ifdef __linux__
     case TARGET_NR_prctl:
         switch (arg1)
             {
@@ -6051,6 +6299,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                 break;
             }
         break;
+#endif /* __linux__ */
 #ifdef TARGET_NR_arch_prctl
     case TARGET_NR_arch_prctl:
 #if defined(TARGET_I386) && !defined(TARGET_ABI32)
@@ -6281,6 +6530,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         unlock_user(p, arg2, 0);
         break;
 #endif
+#ifndef __APPLE__
 #ifdef TARGET_NR_setresuid
     case TARGET_NR_setresuid:
         ret = get_errno(setresuid(low2highuid(arg1),
@@ -6323,6 +6573,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#endif /* __APPLE__ */
     case TARGET_NR_chown:
         if (!(p = lock_user_string(arg1)))
             goto efault;
@@ -6335,12 +6586,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_setgid:
         ret = get_errno(setgid(low2highgid(arg1)));
         break;
+#ifdef __linux__
     case TARGET_NR_setfsuid:
         ret = get_errno(setfsuid(arg1));
         break;
     case TARGET_NR_setfsgid:
         ret = get_errno(setfsgid(arg1));
         break;
+#endif
 #endif /* USE_UID16 */
 
 #ifdef TARGET_NR_lchown32
@@ -6456,6 +6709,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = get_errno(fchown(arg1, arg2, arg3));
         break;
 #endif
+#ifndef __APPLE__
 #ifdef TARGET_NR_setresuid32
     case TARGET_NR_setresuid32:
         ret = get_errno(setresuid(arg1, arg2, arg3));
@@ -6494,6 +6748,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#endif /* __APPLE__ */
 #ifdef TARGET_NR_chown32
     case TARGET_NR_chown32:
         if (!(p = lock_user_string(arg1)))
@@ -6512,6 +6767,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = get_errno(setgid(arg1));
         break;
 #endif
+#ifdef __linux__
 #ifdef TARGET_NR_setfsuid32
     case TARGET_NR_setfsuid32:
         ret = get_errno(setfsuid(arg1));
@@ -6521,6 +6777,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_setfsgid32:
         ret = get_errno(setfsgid(arg1));
         break;
+#endif
 #endif
 
     case TARGET_NR_pivot_root:
@@ -6572,6 +6829,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         break;
 #endif
 #if TARGET_ABI_BITS == 32
+#ifdef F_GETLK64
     case TARGET_NR_fcntl64:
     {
 	int cmd;
@@ -6668,6 +6926,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
 	break;
     }
+#endif /* F_GETLK64 */
 #endif
 #ifdef TARGET_NR_cacheflush
     case TARGET_NR_cacheflush:
@@ -6687,6 +6946,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_gettid:
         ret = get_errno(gettid());
         break;
+#ifndef __APPLE__
 #ifdef TARGET_NR_readahead
     case TARGET_NR_readahead:
 #if TARGET_ABI_BITS == 32
@@ -6704,6 +6964,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #endif
         break;
 #endif
+#endif /* __APPLE__ */
 #ifdef TARGET_NR_setxattr
     case TARGET_NR_setxattr:
     case TARGET_NR_lsetxattr:
@@ -6754,6 +7015,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         goto unimplemented_nowarn;
 #endif
 
+#ifndef __APPLE__
 #ifdef TARGET_NR_clock_gettime
     case TARGET_NR_clock_gettime:
     {
@@ -6776,6 +7038,8 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         break;
     }
 #endif
+#endif /* __APPLE__ */
+#ifndef __APPLE__
 #ifdef TARGET_NR_clock_nanosleep
     case TARGET_NR_clock_nanosleep:
     {
@@ -6787,6 +7051,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         break;
     }
 #endif
+#endif /* __APPLE__ */
 
 #if defined(TARGET_NR_set_tid_address) && defined(__NR_set_tid_address)
     case TARGET_NR_set_tid_address:
@@ -6860,6 +7125,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #endif
 
 #ifdef TARGET_NR_mq_open
+#ifdef __linux__
     case TARGET_NR_mq_open:
         {
             struct mq_attr posix_mq_attr;
@@ -6912,11 +7178,13 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                 put_user_u32(prio, arg4);
         }
         break;
+#endif
 
     /* Not implemented for now... */
 /*     case TARGET_NR_mq_notify: */
 /*         break; */
 
+#ifdef __linux__
     case TARGET_NR_mq_getsetattr:
         {
             struct mq_attr posix_mq_attr_in, posix_mq_attr_out;
@@ -6932,6 +7200,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 
         }
         break;
+#endif /* __linux __ */
 #endif
 
 #ifdef CONFIG_SPLICE

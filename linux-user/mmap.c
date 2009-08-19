@@ -25,8 +25,12 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#ifdef __linux__
 #include <linux/mman.h>
 #include <linux/unistd.h>
+#else
+#define MAP_TYPE 0xf
+#endif
 
 #include "qemu.h"
 #include "qemu-common.h"
@@ -597,6 +601,10 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
     int prot;
     void *host_addr;
 
+#ifdef __APPLE__
+    errno = EINVAL;
+    return -1;
+#else
     mmap_lock();
 
     if (flags & MREMAP_FIXED)
@@ -638,6 +646,7 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
     }
     mmap_unlock();
     return new_addr;
+#endif
 }
 
 int target_msync(abi_ulong start, abi_ulong len, int flags)

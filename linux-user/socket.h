@@ -7,6 +7,8 @@
 	 *
 	 * This defines are ABI conformant as far as Linux supports these ...
 	 */
+	#define TARGET_SOL_IP          0
+	#define TARGET_SOL_TCP         6
 	#define TARGET_SOL_SOCKET      0xffff
 
 	#define TARGET_SO_DEBUG        0x0001  /* Record debugging information.  */
@@ -90,6 +92,8 @@
 #else
 
 	/* For setsockopt(2) */
+	#define TARGET_SOL_IP          0
+	#define TARGET_SOL_TCP         6
 	#define TARGET_SOL_SOCKET      1
 
 	#define TARGET_SO_DEBUG        1

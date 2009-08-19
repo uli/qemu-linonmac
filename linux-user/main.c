@@ -48,7 +48,7 @@ int have_guest_base;
 static const char *interp_prefix = CONFIG_QEMU_PREFIX;
 const char *qemu_uname_release = CONFIG_UNAME_RELEASE;
 
-#if defined(__i386__) && !defined(CONFIG_STATIC)
+#if defined(__linux__) && defined(__i386__) && !defined(CONFIG_STATIC)
 /* Force usage of an ELF interpreter even if it is an ELF shared
    object ! */
 const char interp[] __attribute__((section(".interp"))) = "/lib/ld-linux.so.2";
@@ -56,6 +56,7 @@ const char interp[] __attribute__((section(".interp"))) = "/lib/ld-linux.so.2";
 
 /* for recent libc, we add these dummy symbols which are not declared
    when generating a linked object (bug in ld ?) */
+#ifdef __GLIBC__
 #if (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 3)) && !defined(CONFIG_STATIC)
 asm(".globl __preinit_array_start\n"
     ".globl __preinit_array_end\n"
@@ -72,6 +73,7 @@ asm(".globl __preinit_array_start\n"
     "__fini_array_end:\n"
     ".long 0\n"
     ".previous\n");
+#endif
 #endif
 
 /* XXX: on x86 MAP_GROWSDOWN only works if ESP <= address + 32, so
@@ -2456,6 +2458,10 @@ void init_task_state(TaskState *ts)
     ts->sigqueue_table[i].next = NULL;
 }
  
+#ifdef __APPLE__
+extern char **environ;
+#endif
+
 int main(int argc, char **argv, char **envp)
 {
     const char *filename;

@@ -70,6 +70,8 @@ void cpu_resume_from_signal(CPUState *env1, void *puc)
 #if !defined(CONFIG_SOFTMMU)
 #ifdef __linux__
     struct ucontext *uc = puc;
+#elif defined(__APPLE__)
+    struct __darwin_ucontext *uc = puc;
 #elif defined(__OpenBSD__)
     struct sigcontext *uc = puc;
 #endif
@@ -82,7 +84,7 @@ void cpu_resume_from_signal(CPUState *env1, void *puc)
 #if !defined(CONFIG_SOFTMMU)
     if (puc) {
         /* XXX: use siglongjmp ? */
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
         sigprocmask(SIG_SETMASK, &uc->uc_sigmask, NULL);
 #elif defined(__OpenBSD__)
         sigprocmask(SIG_SETMASK, &uc->sc_mask, NULL);
@@ -801,9 +803,15 @@ static inline int handle_cpu_signal(unsigned long pc, unsigned long address,
 #if defined(__APPLE__)
 # include <sys/ucontext.h>
 
+#ifdef __DARWIN_UNIX03
+# define EIP_sig(context)  (*((unsigned long*)&(context)->uc_mcontext->__ss.__eip))
+# define TRAP_sig(context)    ((context)->uc_mcontext->__es.__trapno)
+# define ERROR_sig(context)   ((context)->uc_mcontext->__es.__err)
+#else
 # define EIP_sig(context)  (*((unsigned long*)&(context)->uc_mcontext->ss.eip))
 # define TRAP_sig(context)    ((context)->uc_mcontext->es.trapno)
 # define ERROR_sig(context)   ((context)->uc_mcontext->es.err)
+#endif
 # define MASK_sig(context)    ((context)->uc_sigmask)
 #elif defined(__OpenBSD__)
 # define EIP_sig(context)     ((context)->sc_eip)
@@ -823,6 +831,8 @@ int cpu_signal_handler(int host_signum, void *pinfo,
     siginfo_t *info = pinfo;
 #if defined(__OpenBSD__)
     struct sigcontext *uc = puc;
+#elif defined(__APPLE__)
+    struct __darwin_ucontext *uc = puc;
 #else
     struct ucontext *uc = puc;
 #endif
