@@ -1531,7 +1531,7 @@ struct target_stat64 {
        abi_ulong    target_st_mtime_nsec;
        abi_ulong    target_st_ctime;
        abi_ulong    target_st_ctime_nsec;
-       abi_long     __unused[3];
+       abi_long     __unused0[3];
 };
 
 #elif defined(TARGET_SH4)
@@ -1615,7 +1615,7 @@ struct target_stat {
 	abi_ulong	target_st_ctime;
 	abi_ulong       target_st_ctime_nsec;
 
-  	abi_long	__unused[3];
+  	abi_long	__unused0[3];
 };
 #else
 #error unsupported CPU
