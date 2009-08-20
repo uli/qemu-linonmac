@@ -4063,12 +4063,14 @@ void syscall_init(void)
                 target_to_host_errno_table[host_to_target_errno_table[i]] = i;
 
         /* automatic consistency check if same arch */
+#ifdef __linux__
 #if (defined(__i386__) && defined(TARGET_I386) && defined(TARGET_ABI32)) || \
     (defined(__x86_64__) && defined(TARGET_X86_64))
         if (unlikely(ie->target_cmd != ie->host_cmd)) {
             fprintf(stderr, "ERROR: ioctl(%s): target=0x%x host=0x%x\n",
                     ie->name, ie->target_cmd, ie->host_cmd);
         }
+#endif
 #endif
         ie++;
     }
