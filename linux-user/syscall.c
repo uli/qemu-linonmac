@@ -4335,6 +4335,104 @@ int get_osversion(void)
     return osversion;
 }
 
+#ifndef __linux__
+struct elf_interpreter {
+    const char *sig;
+    const char *mask;
+    const char *interp;
+};
+
+static struct elf_interpreter terps[] = {
+    /* i386 */
+    {"\x7f" "ELF\x01\x01\x01\x0\x0\x00\x00\x00\x00\x00\x00\x00\x02\x00\x03\x00",
+     "\xff\xff\xff\xff\xff\xfe\xfe\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff",
+     "/usr/local/bin/qemu-i386"},
+    /* i486 */
+    {"\x7f" "ELF\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x06\x00",
+     "\xff\xff\xff\xff\xff\xfe\xfe\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff",
+     "/usr/local/bin/qemu-i386"},
+    /* arm */
+    {"\x7f" "ELF\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x28\x00",
+     "\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff",
+     "/usr/local/bin/qemu-arm"},
+    /* armeb */
+    {"\x7f" "ELF\x01\x02\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x28",
+     "\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff",
+     "/usr/local/bin/qemu-armeb"},
+    /* sparc */
+    {"\x7f" "ELF\x01\x02\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x02",
+     "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff",
+     "/usr/local/bin/qemu-sparc"},
+    /* ppc */
+    {"\x7f" "ELF\x01\x02\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x14",
+     "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff",
+     "/usr/local/bin/qemu-ppc"},
+    /* Please check cpu value and header information for m68k! */
+    /* m68k */
+    {"\x7f" "ELF\x01\x02\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x04",
+     "\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff",
+     "/usr/local/bin/qemu-m68k"},
+    /* FIXME: We could use the other endianness on a MIPS host. */
+    /* mips */
+    {"\x7f" "ELF\x01\x02\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x08",
+     "\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff",
+     "/usr/local/bin/qemu-mips"},
+    /* mipsel */
+    {"\x7f" "ELF\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x08\x00",
+     "\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff",
+     "/usr/local/bin/qemu-mipsel"},
+    /* mipsn32 */
+    {"\x7f" "ELF\x01\x02\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x08",
+     "\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff",
+     "/usr/local/bin/qemu-mipsn32"},
+    /* mipsn32el */
+    {"\x7f" "ELF\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x08\x00",
+     "\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff",
+     "/usr/local/bin/qemu-mipsn32el"},
+    /* mips64 */
+    {"\x7f" "ELF\x02\x02\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x08",
+     "\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff",
+     "/usr/local/bin/qemu-mips64"},
+    /* mips64el */
+    {"\x7f" "ELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x08\x00",
+     "\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff",
+     "/usr/local/bin/qemu-mips64el"},
+    {NULL, NULL, NULL}
+};
+
+/* find out if this file is a Linux ELF binary and return a suitable
+   interpreter if so */
+static const char *get_elf_interpreter(char *file)
+{
+#define ELF_SIGLEN 20
+    int fd;
+    unsigned char buf[ELF_SIGLEN];
+    struct elf_interpreter *t = terps;
+    int i;
+
+    if (!file) return NULL;
+    fd = open(file, O_RDONLY);
+    if (!fd) return NULL;
+    if (read(fd, buf, ELF_SIGLEN) != ELF_SIGLEN) {
+        return NULL;
+    }
+    close(fd);
+
+    while (t->sig) {
+        for (i = 0; i < ELF_SIGLEN; i++) {
+            if ((buf[i] & t->mask[i]) != (t->sig[i] & t->mask[i]))
+                break;
+        }
+        if (i == ELF_SIGLEN) {
+            return t->interp;
+        }
+        t++;
+    }
+
+    return NULL;
+}
+#endif /* !__linux__ */
+
 /* do_syscall() should always have a single exit point at the end so
    that actions, such as logging of syscall results, can be performed.
    All errnos that do_syscall() returns must be -TARGET_<errcode>. */
@@ -4529,8 +4627,28 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             abi_ulong guest_envp;
             abi_ulong addr;
             char **q;
+#ifndef __linux__
+            const char *elf_interpreter = NULL;
+#endif
 
-            argc = 0;
+            p = lock_user_string(arg1);
+
+#ifndef __linux__
+            /* no Linux -> no binfmt_misc; we are on our own and need to find
+               out if the binary to execute is Linux ELF */
+            elf_interpreter = get_elf_interpreter(p);
+#endif
+
+#ifndef __linux__
+            if (elf_interpreter) {
+                /* need to cram in the interpreter before the other arguments */
+                argc = 1;
+            }
+            else
+#endif
+            {
+                argc = 0;
+            }
             guest_argp = arg2;
             for (gp = guest_argp; gp; gp += sizeof(abi_ulong)) {
                 if (get_user_ual(addr, gp))
@@ -4552,7 +4670,24 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             argp = alloca((argc + 1) * sizeof(void *));
             envp = alloca((envc + 1) * sizeof(void *));
 
-            for (gp = guest_argp, q = argp; gp;
+#ifndef __linux__
+            if (elf_interpreter) {
+                argp[0] = elf_interpreter;
+                /* interpreter and binary with path need to go in first,
+                   so we leave some room */
+                q = argp + 2;
+                /* skip argv[0], it will be replaced with the full path
+                   to the binary */
+                gp = guest_argp + sizeof(abi_ulong);
+            }
+            else
+#endif
+            {
+                q = argp;
+                gp = guest_argp;
+            }
+            
+            for (; gp;
                   gp += sizeof(abi_ulong), q++) {
                 if (get_user_ual(addr, gp))
                     goto execve_efault;
@@ -4574,10 +4709,23 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
             *q = NULL;
 
-            if (!(p = lock_user_string(arg1)))
-                goto execve_efault;
+            if (!p) goto execve_efault;
+#ifndef __linux__
+            if (elf_interpreter) {
+                /* the full path to the binary takes the place of argv[0]
+                   (right after the interpreter, hence argp[1]) */
+                argp[1] = p;
+                p = elf_interpreter; /* actual program to execute */
+            }
+#endif
             ret = get_errno(execve(p, argp, envp));
-            unlock_user(p, arg1, 0);
+#ifndef __linux__
+            if (elf_interpreter) {
+                unlock_user(argp[1], arg1, 0);
+            }
+            else
+#endif
+                unlock_user(p, arg1, 0);
 
             goto execve_end;
 
@@ -4585,7 +4733,18 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             ret = -TARGET_EFAULT;
 
         execve_end:
-            for (gp = guest_argp, q = argp; *q;
+#ifndef __linux__
+            if (elf_interpreter) {
+                q = argp + 2;
+                gp = guest_argp + sizeof(abi_ulong);
+            }
+            else
+#endif
+            {
+                q = argp;
+                gp = guest_argp;
+            }
+            for (; *q;
                   gp += sizeof(abi_ulong), q++) {
                 if (get_user_ual(addr, gp)
                     || !addr)
