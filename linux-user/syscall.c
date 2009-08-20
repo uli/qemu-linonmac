@@ -1565,9 +1565,11 @@ static abi_long do_socket(int domain, int type, int protocol)
     case TARGET_SOCK_SEQPACKET:
         type = SOCK_SEQPACKET;
         break;
+#ifdef SOCK_PACKET
     case TARGET_SOCK_PACKET:
         type = SOCK_PACKET;
         break;
+#endif
     }
 #endif
     if (domain == TARGET_PF_NETLINK)
@@ -5861,11 +5863,13 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = get_errno(do_semop(arg1, arg2, arg3));
         break;
 #endif
+#ifdef __linux__
 #ifdef TARGET_NR_semctl
     case TARGET_NR_semctl:
         ret = do_semctl(arg1, arg2, arg3, (union target_semun)(abi_ulong)arg4);
         break;
 #endif
+#endif /* __linux__ */
 #ifdef TARGET_NR_msgctl
     case TARGET_NR_msgctl:
         ret = do_msgctl(arg1, arg2, arg3);
@@ -5891,6 +5895,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = get_errno(shmget(arg1, arg2, arg3));
         break;
 #endif
+#ifdef __linux__
 #ifdef TARGET_NR_shmctl
     case TARGET_NR_shmctl:
         ret = do_shmctl(arg1, arg2, arg3);
@@ -5901,6 +5906,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = do_shmat(arg1, arg2, arg3);
         break;
 #endif
+#endif /* __linux__ */
 #ifdef TARGET_NR_shmdt
     case TARGET_NR_shmdt:
         ret = do_shmdt(arg1);
@@ -6335,13 +6341,21 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_pread64:
         if (!(p = lock_user(VERIFY_WRITE, arg2, arg3, 0)))
             goto efault;
+#ifdef __APPLE__
+        ret = get_errno(pread(arg1, p, arg3, target_offset64(arg4, arg5)));
+#else
         ret = get_errno(pread64(arg1, p, arg3, target_offset64(arg4, arg5)));
+#endif
         unlock_user(p, arg2, ret);
         break;
     case TARGET_NR_pwrite64:
         if (!(p = lock_user(VERIFY_READ, arg2, arg3, 1)))
             goto efault;
+#ifdef __APPLE__
+        ret = get_errno(pwrite(arg1, p, arg3, target_offset64(arg4, arg5)));
+#else
         ret = get_errno(pwrite64(arg1, p, arg3, target_offset64(arg4, arg5)));
+#endif
         unlock_user(p, arg2, 0);
         break;
 #endif
