@@ -767,6 +767,9 @@ case "$cpu" in
 esac
 
 # Check host NPTL support
+if test "$darwin" = "yes" ; then
+  nptl="yes"
+else
 cat > $TMPC <<EOF
 #include <sched.h>
 #include <linux/futex.h>
@@ -782,6 +785,7 @@ if compile_object ; then
   :
 else
    nptl="no"
+fi
 fi
 
 ##########################################
