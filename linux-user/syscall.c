@@ -112,13 +112,15 @@
 #include "qemu.h"
 #include "qemu-common.h"
 
-#if defined(CONFIG_USE_NPTL)
+#ifndef CLONE_SETTLS
+#define CLONE_SETTLS 0x80000
+#define CLONE_PARENT_SETTID 0x100000
+#define CLONE_CHILD_SETTID 0x1000000
+#define CLONE_CHILD_CLEARTID 0x200000
+#endif
+
 #define CLONE_NPTL_FLAGS2 (CLONE_SETTLS | \
     CLONE_PARENT_SETTID | CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID)
-#else
-/* XXX: Hardcode the above values.  */
-#define CLONE_NPTL_FLAGS2 0
-#endif
 
 //#define DEBUG
 
