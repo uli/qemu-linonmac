@@ -260,6 +260,11 @@ _syscall6(int,sys_futex,int *,uaddr,int,op,int,val,
           const struct timespec *,timeout,int *,uaddr2,int,val3)
 #endif
 #endif
+#else /* __linux__ */
+int sys_futex(int *uaddr, int op, int val, const struct timespec *timeout, int *uaddr2, int val3)
+{
+    return -EINVAL;
+}
 #endif /* __linux__ */
 
 static bitmask_transtbl fcntl_flags_tbl[] = {
@@ -3701,9 +3706,11 @@ static int do_fork(CPUState *env, unsigned int flags, abi_ulong newsp,
     sigset_t sigmask;
 #endif
 
+#ifndef __APPLE__
     /* Emulate vfork() with fork() */
     if (flags & CLONE_VFORK)
         flags &= ~(CLONE_VFORK | CLONE_VM);
+#endif
 
     if (flags & CLONE_VM) {
 #ifdef __APPLE__
@@ -3795,6 +3802,11 @@ static int do_fork(CPUState *env, unsigned int flags, abi_ulong newsp,
         if ((flags & ~(CSIGNAL | CLONE_NPTL_FLAGS2)) != 0)
             return -EINVAL;
         fork_start();
+#ifdef __APPLE__
+        if (flags & CLONE_VFORK)
+            ret = vfork();
+        else
+#endif
         ret = fork();
         if (ret == 0) {
             /* Child Process.  */

@@ -20,7 +20,7 @@
 #include "gdbstub.h"
 #include "sys-queue.h"
 
-#if defined(CONFIG_USE_NPTL)
+#if defined(CONFIG_USE_NPTL) && !defined(__APPLE__)
 #define THREAD __thread
 #else
 #define THREAD
