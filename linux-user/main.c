@@ -1035,7 +1035,9 @@ uint32_t cpu_ppc_load_atbu (CPUState *env)
 }
 
 uint32_t cpu_ppc601_load_rtcu (CPUState *env)
-__attribute__ (( alias ("cpu_ppc_load_tbu") ));
+{
+    return cpu_ppc_get_tb(env) >> 32;
+}
 
 uint32_t cpu_ppc601_load_rtcl (CPUState *env)
 {
