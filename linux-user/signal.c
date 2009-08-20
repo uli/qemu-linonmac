@@ -3065,9 +3065,17 @@ struct target_signal_frame {
     uint32_t tramp[2];
 };
 
+struct target_ucontext {
+        abi_ulong         tuc_flags;
+        abi_ulong         tuc_link;
+	target_stack_t	  tuc_stack;
+	struct target_sigcontext tuc_mcontext;
+	target_sigset_t	  tuc_sigmask;	/* mask last for extensibility */
+};
+
 struct rt_signal_frame {
-    struct siginfo info;
-    struct ucontext uc;
+    target_siginfo_t info;
+    struct target_ucontext uc;
     uint32_t tramp[2];
 };
 
@@ -3282,11 +3290,19 @@ struct target_signal_frame {
         uint8_t retcode[8];       /* Trampoline code. */
 };
 
+struct target_ucontext {
+        abi_ulong         tuc_flags;
+        abi_ulong         tuc_link;
+	target_stack_t	  tuc_stack;
+	struct target_sigcontext tuc_mcontext;
+	target_sigset_t	  tuc_sigmask;	/* mask last for extensibility */
+};
+
 struct rt_signal_frame {
-        struct siginfo *pinfo;
+        target_siginfo_t *pinfo;
         void *puc;
-        struct siginfo info;
-        struct ucontext uc;
+        target_siginfo_t info;
+        struct target_ucontext uc;
         uint8_t retcode[8];       /* Trampoline code. */
 };
 
