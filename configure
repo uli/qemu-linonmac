@@ -277,8 +277,7 @@ Darwin)
   cocoa="yes"
   audio_drv_list="coreaudio"
   audio_possible_drivers="coreaudio sdl fmod"
-  LDFLAGS="-framework CoreFoundation -framework IOKit $LDFLAGS"
-  libs_softmmu="-F/System/Library/Frameworks -framework Cocoa -framework IOKit $libs_softmmu"
+  libs_softmmu="-F/System/Library/Frameworks -framework Cocoa -framework CoreFoundation -framework IOKit $libs_softmmu"
 ;;
 SunOS)
   solaris="yes"
