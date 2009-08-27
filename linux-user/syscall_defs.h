@@ -2096,20 +2096,38 @@ struct target_sysinfo {
     char _f[20-2*sizeof(abi_long)-sizeof(int)]; /* Padding: libc5 uses this.. */
 };
 
-struct linux_dirent {
+#ifdef __linux__
+struct host_dirent {
     long            d_ino;
     unsigned long   d_off;
     unsigned short  d_reclen;
     char            d_name[256]; /* We must not include limits.h! */
 };
 
-struct linux_dirent64 {
+struct host_dirent64 {
     uint64_t        d_ino;
     int64_t         d_off;
     unsigned short  d_reclen;
     unsigned char   d_type;
     char            d_name[256];
 };
+#elif defined(__APPLE__)
+#include <sys/dirent.h>
+struct host_dirent {
+    uint32_t d_ino; /* aka d_fileno */
+    uint16_t d_reclen;
+    uint8_t d_type;
+    uint8_t d_namlen;
+    char d_name[256];
+};
+struct host_dirent64 {
+    uint32_t d_ino; /* aka d_fileno */
+    uint16_t d_reclen;
+    uint8_t d_type;
+    uint8_t d_namlen;
+    char d_name[256];
+};
+#endif
 
 struct target_mq_attr {
     abi_long mq_flags;

@@ -125,8 +125,8 @@
 //#define DEBUG
 
 //#include <linux/msdos_fs.h>
-#define	VFAT_IOCTL_READDIR_BOTH		_IOR('r', 1, struct linux_dirent [2])
-#define	VFAT_IOCTL_READDIR_SHORT	_IOR('r', 2, struct linux_dirent [2])
+#define	VFAT_IOCTL_READDIR_BOTH		_IOR('r', 1, struct host_dirent [2])
+#define	VFAT_IOCTL_READDIR_SHORT	_IOR('r', 2, struct host_dirent [2])
 
 
 #undef _syscall0
@@ -228,11 +228,11 @@ static int gettid(void) {
 #endif
 #ifdef __linux__
 #if TARGET_ABI_BITS == 32
-_syscall3(int, sys_getdents, uint, fd, struct linux_dirent *, dirp, uint, count);
+_syscall3(int, sys_getdents, uint, fd, struct host_dirent *, dirp, uint, count);
 #endif
 #endif /* __linux__ */
 #if defined(TARGET_NR_getdents64) && defined(__NR_getdents64)
-_syscall3(int, sys_getdents64, uint, fd, struct linux_dirent64 *, dirp, uint, count);
+_syscall3(int, sys_getdents64, uint, fd, struct host_dirent64 *, dirp, uint, count);
 #endif
 #ifdef __linux__
 _syscall2(int, sys_getpriority, int, which, int, who);
@@ -265,6 +265,7 @@ int sys_futex(int *uaddr, int op, int val, const struct timespec *timeout, int *
 {
     return -EINVAL;
 }
+int getdirentries(int fd, char *buf, int nbytes, long *basep);
 #endif /* __linux__ */
 
 static bitmask_transtbl fcntl_flags_tbl[] = {
@@ -6210,14 +6211,13 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
-#ifdef __linux__
     case TARGET_NR_getdents:
 #if TARGET_ABI_BITS != 32
         goto unimplemented;
-#elif TARGET_ABI_BITS == 32 && HOST_LONG_BITS == 64
+#elif TARGET_ABI_BITS == 32 && HOST_LONG_BITS == 64 || !defined(__linux__)
         {
             struct target_dirent *target_dirp;
-            struct linux_dirent *dirp;
+            struct host_dirent *dirp;
             abi_long count = arg3;
 
 	    dirp = malloc(count);
@@ -6226,9 +6226,16 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                 goto fail;
             }
 
+#ifdef __linux__
             ret = get_errno(sys_getdents(arg1, dirp, count));
+#elif defined(__APPLE__)
+            long basep = 0;
+            ret = get_errno(getdirentries(arg1, (char *)dirp, count, &basep));
+#else
+#error unsupported system (getdents)
+#endif
             if (!is_error(ret)) {
-                struct linux_dirent *de;
+                struct host_dirent *de;
 		struct target_dirent *tde;
                 int len = ret;
                 int reclen, treclen;
@@ -6244,13 +6251,17 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 		    treclen = reclen - (2 * (sizeof(long) - sizeof(abi_long)));
                     tde->d_reclen = tswap16(treclen);
                     tde->d_ino = tswapl(de->d_ino);
+#ifdef __APPLE__
+                    tde->d_off = (abi_ulong)tde + treclen; /* ??? */
+#else
                     tde->d_off = tswapl(de->d_off);
+#endif
 		    tnamelen = treclen - (2 * sizeof(abi_long) + 2);
 		    if (tnamelen > 256)
                         tnamelen = 256;
                     /* XXX: may not be correct */
                     pstrcpy(tde->d_name, tnamelen, de->d_name);
-                    de = (struct linux_dirent *)((char *)de + reclen);
+                    de = (struct host_dirent *)((char *)de + reclen);
                     len -= reclen;
                     tde = (struct target_dirent *)((char *)tde + treclen);
 		    count1 += treclen;
@@ -6262,14 +6273,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
 #else
         {
-            struct linux_dirent *dirp;
+            struct host_dirent *dirp;
             abi_long count = arg3;
 
             if (!(dirp = lock_user(VERIFY_WRITE, arg2, count, 0)))
                 goto efault;
             ret = get_errno(sys_getdents(arg1, dirp, count));
             if (!is_error(ret)) {
-                struct linux_dirent *de;
+                struct host_dirent *de;
                 int len = ret;
                 int reclen;
                 de = dirp;
@@ -6278,9 +6289,10 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                     if (reclen > len)
                         break;
                     de->d_reclen = tswap16(reclen);
+                    tswapls(&de->d_fileno);
                     tswapls(&de->d_ino);
                     tswapls(&de->d_off);
-                    de = (struct linux_dirent *)((char *)de + reclen);
+                    de = (struct host_dirent *)((char *)de + reclen);
                     len -= reclen;
                 }
             }
@@ -6288,16 +6300,83 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
 #endif
         break;
-#if defined(TARGET_NR_getdents64) && defined(__NR_getdents64)
+#if defined(TARGET_NR_getdents64) && (defined(__NR_getdents64) || defined(__APPLE__))
     case TARGET_NR_getdents64:
+#if !defined(__linux__)
+        /* not Linux, so we cannot assume host_dirent64 and target_dirent64
+           to have the same layout; very similar to the getdents implementation
+           for TARGET_ABI_BITS == 32 && HOST_LONG_BITS == 64 */
         {
-            struct linux_dirent64 *dirp;
+            struct target_dirent64 *target_dirp;
+            struct host_dirent64 *dirp;
+            abi_long count = arg3;
+
+	    dirp = malloc(count);
+	    if (!dirp) {
+                ret = -TARGET_ENOMEM;
+                goto fail;
+            }
+
+#if defined(__APPLE__)
+            long basep = 0;
+            ret = get_errno(getdirentries(arg1, (char *)dirp, count, &basep));
+#else
+#error unsupported system (getdents64)
+#endif
+            if (!is_error(ret)) {
+                struct host_dirent64 *de;
+		struct target_dirent64 *tde;
+                int len = ret;
+                int reclen, treclen;
+		int count1, tnamelen;
+
+		count1 = 0;
+                de = dirp;
+                if (!(target_dirp = lock_user(VERIFY_WRITE, arg2, count, 0)))
+                    goto efault;
+		tde = target_dirp;
+                while (len > 0) {
+                    reclen = de->d_reclen ;
+		    treclen = reclen - offsetof(struct host_dirent64, d_name) + offsetof(struct target_dirent64, d_name);
+                    tde->d_ino = tswapl(de->d_ino);
+#ifdef __APPLE__
+                    /* not sure what the deeper meaning of d_off is; on NFS
+                       directories, it's just counting upwards from 1 */
+                    tde->d_off = tswapl(count1 + 1);
+#else
+                    tde->d_off = tswapl(de->d_off);
+#endif
+#ifdef __APPLE__
+                    tnamelen = de->d_namlen + 1;
+#else
+		    tnamelen = treclen - (2 * sizeof(abi_long) + 2);
+#endif
+                    tde->d_type = de->d_type;
+                    tde->d_reclen = tswap16(treclen);
+		    if (tnamelen > 256)
+                        tnamelen = 256;
+                    /* XXX: may not be correct */
+                    pstrcpy(tde->d_name, tnamelen, de->d_name);
+                    de = (struct host_dirent64 *)((char *)de + reclen);
+                    len -= reclen;
+                    tde = (struct target_dirent64 *)((char *)tde + treclen);
+		    count1 += treclen;
+                }
+		ret = count1;
+                unlock_user(target_dirp, arg2, ret);
+            }
+	    free(dirp);
+        }
+#else /* !defined(__linux__) */
+        /* Linux implementation that only does endianness correction */
+        {
+            struct host_dirent64 *dirp;
             abi_long count = arg3;
             if (!(dirp = lock_user(VERIFY_WRITE, arg2, count, 0)))
                 goto efault;
             ret = get_errno(sys_getdents64(arg1, dirp, count));
             if (!is_error(ret)) {
-                struct linux_dirent64 *de;
+                struct host_dirent64 *de;
                 int len = ret;
                 int reclen;
                 de = dirp;
@@ -6308,15 +6387,15 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                     de->d_reclen = tswap16(reclen);
                     tswap64s((uint64_t *)&de->d_ino);
                     tswap64s((uint64_t *)&de->d_off);
-                    de = (struct linux_dirent64 *)((char *)de + reclen);
+                    de = (struct host_dirent64 *)((char *)de + reclen);
                     len -= reclen;
                 }
             }
             unlock_user(dirp, arg2, ret);
         }
+#endif /* !defined(__linux__) */
         break;
 #endif /* TARGET_NR_getdents64 */
-#endif /* __linux__ */
 #ifdef TARGET_NR__newselect
     case TARGET_NR__newselect:
         ret = do_select(arg1, arg2, arg3, arg4, arg5);
